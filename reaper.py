@@ -28,7 +28,7 @@ class TTblDevices(Base):
         autoincrement=True
     )
     mac = Column(
-        String(17),
+        String(12),
         comment='MAC устройства',
         nullable=False,
         unique=True,

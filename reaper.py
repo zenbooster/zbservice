@@ -5,6 +5,8 @@ from sqlalchemy import create_engine
 from sqlalchemy_utils import database_exists, create_database
 
 from sqlalchemy import Column, ForeignKey, BigInteger, SmallInteger, Float, String, Text, TIMESTAMP
+from sqlalchemy import update
+
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -46,7 +48,6 @@ class TTblDevices(Base):
     description = Column(Text, comment='описание устройства')
 
     sessions = relationship("TTblSessions", back_populates="devices")
-    eeg_power = relationship("TTblEegPower", back_populates="devices")
     options = relationship("TTblOptions", back_populates="devices")
 
     def __repr__(self):
@@ -96,12 +97,6 @@ class TTblEegPower(Base):
         primary_key=True,
         autoincrement=True
     )
-    id_device = Column(
-        BigInteger,
-        ForeignKey('devices.id'),
-        comment='ИД устройства',
-        nullable=False
-    )
     id_session = Column(
         BigInteger,
         ForeignKey('sessions.id'),
@@ -123,7 +118,6 @@ class TTblEegPower(Base):
     ea = Column(Float, comment='esense внимание', nullable=False)
     em = Column(Float, comment='esense медитация', nullable=False)
 
-    devices = relationship('TTblDevices', back_populates='eeg_power')
     sessions = relationship('TTblSessions', back_populates='eeg_power')
 
     def __repr__(self):
@@ -187,33 +181,47 @@ def on_connect(client, userdata, flags, rc):
 
     client.subscribe('devices/zenbooster/#')
 
+def get_device(mac):
+    with Session(engine) as session:
+        device = session.query(TTblDevices.id, TTblDevices.mac).filter_by(mac=mac).first()
+        return device
+
+def get_last_opened_session(mac):
+    id_device = get_device(mac).id
+    with Session(engine) as session:
+        sess = session.query(TTblSessions.id, TTblSessions.id_device, TTblSessions.begin, TTblSessions.end).filter_by(id_device=id_device, end=None).order_by(TTblSessions.begin.desc()).first()
+        return sess
+
 def on_message(client, userdata, msg):
     st = msg.topic
     print('topic: '+st)
     st = st[len('devices/zenbooster/'):]
     mac=st[:6*2+5]
     st = st[len(mac)+1:]
+    mac = mac.translate(str.maketrans('', '', ':- '))
+    print('subtopic: '+st)
+    print('mac: '+mac)
+
+    js = msg.payload.decode()
+    print('data: '+js)
+    js = json.loads(js)
+    when = js['when']
+    dt_when = datetime.utcfromtimestamp(when)
+
+    print('when: {}'.format(dt_when))
+
+    engine = userdata
 
     if st == 'hello':
-        mac = mac.translate(str.maketrans('', '', ':- '))
-
-        print('subtopic: '+st)
-        print('mac: '+mac)
-        js = msg.payload.decode()
-        print('data: '+js)
-        js = json.loads(js)
-        when = js['when']
-
-        print('when: {}'.format(datetime.utcfromtimestamp(when)))
-
-        engine = userdata
+        print(f'begin on_{st}')
         with Session(engine) as session:
-            device = session.query(TTblDevices.id, TTblDevices.mac).filter_by(mac=mac).first()
+            #device = session.query(TTblDevices.id, TTblDevices.mac).filter_by(mac=mac).first()
+            device = get_device(mac)
             is_exists = device is not None
-
 
         id_device = None
         if is_exists:
+            print('Устройство "{}" уже есть в БД.'.format(mac))
             id_device = device.id
         else:
             print('Добавляем новое устройство "{}".'.format(mac))
@@ -224,7 +232,61 @@ def on_message(client, userdata, msg):
                 id_device = device.id
 
         print('ИД устройства: {}'.format(id_device))
+        print(f'end on_{st}')
 
+    elif st == 'session_begin':
+        print(f'begin on_{st}')
+        print('Открываем новую сессию для устройства "{}".'.format(mac))
+        with Session(engine) as session:
+            sess = TTblSessions(id_device=get_device(mac).id, begin=dt_when)
+            session.add(sess)
+            session.commit()
+            id_session = sess.id
+        print('ИД сессии: {}'.format(id_session))
+        print(f'end on_{st}')
+
+    elif st == 'eeg_power':
+        print(f'begin on_{st}')
+        id_session = get_last_opened_session(mac).id
+        with Session(engine) as session:
+            eeg_power = TTblEegPower(
+                id_session=get_last_opened_session(mac).id,
+                when=dt_when,
+                poor=js['poor'],
+                d=js['d'],
+                t=js['t'],
+                al=js['al'],
+                ah=js['ah'],
+                bl=js['bl'],
+                bh=js['bh'],
+                gl=js['gl'],
+                gm=js['gm'],
+                ea=js['ea'],
+                em=js['em']
+            )
+            session.add(eeg_power)
+            session.commit()
+        print(f'end on_{st}')
+
+    elif st == 'session_end':
+        print(f'begin on_{st}')
+        print('Закрываем сессию для устройства "{}".'.format(mac))
+        id_session = get_last_opened_session(mac).id
+        print('ИД закрываемой сессии: {}'.format(id_session))
+
+        with Session(engine) as session:
+            with session.begin():
+                session.execute(
+                    update(TTblSessions)
+                    .where(TTblSessions.id==id_session)
+                    .values(end=dt_when)
+                )
+        session.commit()
+        print(f'end on_{st}')
+
+    elif st == 'bye':
+        print(f'begin on_{st}')
+        print(f'end on_{st}')
 
 def on_log(client, userdata, level, buf):
   print('log: ', buf)

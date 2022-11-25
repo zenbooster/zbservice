@@ -208,11 +208,22 @@ def on_message(client, userdata, msg):
 
         engine = userdata
         with Session(engine) as session:
-            is_exists = session.query(TTblDevices.mac).filter_by(name=st).first() is not None
+            device = session.query(TTblDevices.id, TTblDevices.mac).filter_by(mac=mac).first()
+            is_exists = device is not None
 
 
-        if not is_exists:
-            print('ты кто?')
+        id_device = None
+        if is_exists:
+            id_device = device.id
+        else:
+            print('Добавляем новое устройство "{}".'.format(mac))
+            with Session(engine) as session:
+                device = TTblDevices(mac=mac, name="zenbooster")
+                session.add(device)
+                session.commit()
+                id_device = device.id
+
+        print('ИД устройства: {}'.format(id_device))
 
 
 def on_log(client, userdata, level, buf):

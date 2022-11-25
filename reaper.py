@@ -181,10 +181,15 @@ class TTblConfig(Base):
     def __repr__(self):
         return f'{self.id} {self.id_device} {self.when} {self.name} {self.val}'
 
+def get_cfg_namespace(engine, name):
+    with Session(engine) as session:
+        res = session.query(TTblCfgNamespace.id, TTblCfgNamespace.name).filter_by(name=name).first()
+        return res
+
 def chk_cfg_namespace(engine, name):
     cfg_namespace = None
     with Session(engine) as session:
-        cfg_namespace = session.query(TTblCfgNamespace.name).filter_by(name=name).first()
+        cfg_namespace = get_cfg_namespace(engine, name) #session.query(TTblCfgNamespace.name).filter_by(name=name).first()
 
     if cfg_namespace is None:
         with Session(engine) as session:
@@ -225,14 +230,35 @@ def on_connect(client, userdata, flags, rc):
 
 def get_device(mac):
     with Session(engine) as session:
-        device = session.query(TTblDevice.id, TTblDevice.mac).filter_by(mac=mac).first()
-        return device
+        res = session.query(TTblDevice.id, TTblDevice.mac).filter_by(mac=mac).first()
+        return res
 
 def get_last_opened_session(mac):
     id_device = get_device(mac).id
     with Session(engine) as session:
         sess = session.query(TTblSession.id, TTblSession.id_device, TTblSession.begin, TTblSession.end).filter_by(id_device=id_device, end=None).order_by(TTblSession.begin.desc()).first()
         return sess
+
+def get_last_config(id_device, id_cfg_namespace, k):
+    with Session(engine) as session:
+        res = session.query(TTblConfig.id, TTblConfig.id_device, TTblConfig.id_cfg_namespace, TTblConfig.when, TTblConfig.name, TTblConfig.val) \
+          .filter_by(id_device=id_device, id_cfg_namespace=id_cfg_namespace, name=k) \
+          .order_by(TTblConfig.when.desc()) \
+          .first()
+        return res
+
+def update_config(id_device, namespace, k, v):
+    id_cfg_namespace = get_cfg_namespace(engine, namespace).id
+    o = get_last_config(id_device, id_cfg_namespace, k)
+    if (o is None) or (o.val != v):
+        with Session(engine) as session:
+            o = TTblConfig(id_device=id_device, id_cfg_namespace=id_cfg_namespace, when=datetime.utcnow(), name=k, val=v)
+            session.add(o)
+            session.commit()
+
+def update_config_table(id_device, namespace, js):
+    for k, v in js.items():
+        update_config(id_device, namespace, k, v)
 
 def on_message(client, userdata, msg):
     st = msg.topic
@@ -271,6 +297,9 @@ def on_message(client, userdata, msg):
                 session.add(device)
                 session.commit()
                 id_device = device.id
+
+        update_config_table(id_device, 'option', js['options'])
+        update_config_table(id_device, 'formula', js['formulas'])
 
         print('ИД устройства: {}'.format(id_device))
 

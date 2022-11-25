@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy_utils import database_exists, create_database
 
 from sqlalchemy import Column, ForeignKey, BigInteger, SmallInteger, Float, String, Text, TIMESTAMP
-from sqlalchemy import update
+from sqlalchemy import update, delete
 
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
@@ -212,10 +212,9 @@ def on_message(client, userdata, msg):
 
     engine = userdata
 
+    print(f'[begin on_{st}]')
     if st == 'hello':
-        print(f'begin on_{st}')
         with Session(engine) as session:
-            #device = session.query(TTblDevices.id, TTblDevices.mac).filter_by(mac=mac).first()
             device = get_device(mac)
             is_exists = device is not None
 
@@ -232,10 +231,8 @@ def on_message(client, userdata, msg):
                 id_device = device.id
 
         print('ИД устройства: {}'.format(id_device))
-        print(f'end on_{st}')
 
     elif st == 'session_begin':
-        print(f'begin on_{st}')
         print('Открываем новую сессию для устройства "{}".'.format(mac))
         with Session(engine) as session:
             sess = TTblSessions(id_device=get_device(mac).id, begin=dt_when)
@@ -243,11 +240,11 @@ def on_message(client, userdata, msg):
             session.commit()
             id_session = sess.id
         print('ИД сессии: {}'.format(id_session))
-        print(f'end on_{st}')
 
     elif st == 'eeg_power':
-        print(f'begin on_{st}')
         id_session = get_last_opened_session(mac).id
+        print('Добавляем данные в сессию с ИД {}.'.format(id_session))
+
         with Session(engine) as session:
             eeg_power = TTblEegPower(
                 id_session=get_last_opened_session(mac).id,
@@ -266,10 +263,8 @@ def on_message(client, userdata, msg):
             )
             session.add(eeg_power)
             session.commit()
-        print(f'end on_{st}')
 
     elif st == 'session_end':
-        print(f'begin on_{st}')
         print('Закрываем сессию для устройства "{}".'.format(mac))
         id_session = get_last_opened_session(mac).id
         print('ИД закрываемой сессии: {}'.format(id_session))
@@ -281,12 +276,22 @@ def on_message(client, userdata, msg):
                     .where(TTblSessions.id==id_session)
                     .values(end=dt_when)
                 )
-        session.commit()
-        print(f'end on_{st}')
+            session.commit()
+
+    elif st == 'session_cancel':
+        print('Удаляем сессию и связанные данные для устройства "{}".'.format(mac))
+        id_session = get_last_opened_session(mac).id
+        print('ИД удаляемой сессии: {}'.format(id_session))
+
+        with Session(engine) as session:
+            session.execute(delete(TTblEegPower).where(TTblEegPower.id_session==id_session))
+            session.execute(delete(TTblSessions).where(TTblSessions.id==id_session))
+            session.commit()
 
     elif st == 'bye':
-        print(f'begin on_{st}')
-        print(f'end on_{st}')
+        pass
+
+    print(f'[end on_{st}]\n')
 
 def on_log(client, userdata, level, buf):
   print('log: ', buf)

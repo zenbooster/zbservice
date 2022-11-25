@@ -20,9 +20,9 @@ from datetime import datetime
 
 Base = declarative_base()
 
-class TTblDevices(Base):
+class TTblDevice(Base):
 
-    __tablename__ = 'devices'
+    __tablename__ = 'device'
     __tableargs__ = {
         'comment': 'устройства'
     }
@@ -47,15 +47,15 @@ class TTblDevices(Base):
     )
     description = Column(Text, comment='описание устройства')
 
-    sessions = relationship("TTblSessions", back_populates="devices")
-    options = relationship("TTblOptions", back_populates="devices")
+    session = relationship("TTblSession", back_populates="device")
+    config = relationship("TTblConfig", back_populates="device")
 
     def __repr__(self):
         return f'{self.id} {self.mac} {self.name} {self.description}'
 
-class TTblSessions(Base):
+class TTblSession(Base):
 
-    __tablename__ = 'sessions'
+    __tablename__ = 'session'
     __tableargs__ = {
         'comment': 'сеансы'
     }
@@ -69,7 +69,7 @@ class TTblSessions(Base):
     )
     id_device = Column(
         BigInteger,
-        ForeignKey('devices.id'),
+        ForeignKey('device.id'),
         comment='ИД устройства',
         nullable=False
     )
@@ -77,8 +77,8 @@ class TTblSessions(Base):
     end = Column(TIMESTAMP, comment='конец')
     description = Column(Text, comment='описание сессии')
 
-    eeg_power = relationship("TTblEegPower", back_populates="sessions")
-    devices = relationship('TTblDevices', back_populates='sessions')
+    eeg_power = relationship("TTblEegPower", back_populates="session")
+    device = relationship('TTblDevice', back_populates='session')
 
     def __repr__(self):
         return f'{self.id} {self.id_device} {self.begin} {self.end} {self.description}'
@@ -99,7 +99,7 @@ class TTblEegPower(Base):
     )
     id_session = Column(
         BigInteger,
-        ForeignKey('sessions.id'),
+        ForeignKey('session.id'),
         comment='ИД сеанса',
         nullable=False
     )
@@ -117,15 +117,37 @@ class TTblEegPower(Base):
     gm = Column(Float, comment='средняя гамма', nullable=False)
     ea = Column(Float, comment='esense внимание', nullable=False)
     em = Column(Float, comment='esense медитация', nullable=False)
+    f = Column(Float, comment='значение формулы', nullable=False)
 
-    sessions = relationship('TTblSessions', back_populates='eeg_power')
+    session = relationship('TTblSession', back_populates='eeg_power')
 
     def __repr__(self):
         return f'{self.id} {self.id_device} {self.id_session} {self.when} {self.poor} {self.d} {self.t} {self.al} {self.ah} {self.bl} {self.bh} {self.gl} {self.gm} {self.ea} {self.em}'
 
-class TTblOptions(Base):
+class TTblCfgNamespace(Base):
 
-    __tablename__ = 'options'
+    __tablename__ = 'cfg_namespace'
+    __tableargs__ = {
+        'comment': 'конфигурационные пространства имён'
+    }
+
+    id = Column(
+        BigInteger,
+        nullable=False,
+        unique=True,
+        primary_key=True,
+        autoincrement=True
+    )
+    name = Column(String(16), comment='пространство имён', nullable=False, unique=True)
+
+    config = relationship("TTblConfig", back_populates="cfg_namespace")
+
+    def __repr__(self):
+        return f'{self.id} {self.name}'
+
+class TTblConfig(Base):
+
+    __tablename__ = 'config'
     __tableargs__ = {
         'comment': 'опции'
     }
@@ -139,18 +161,36 @@ class TTblOptions(Base):
     )
     id_device = Column(
         BigInteger,
-        ForeignKey('devices.id'),
+        ForeignKey('device.id'),
         comment='ИД устройства',
         nullable=False
     )
-    when = Column(TIMESTAMP, comment='когда')
-    name = Column(String(16), comment='имя опции')
+    id_cfg_namespace = Column(
+        BigInteger,
+        ForeignKey('cfg_namespace.id'),
+        comment='ИД пространства имён',
+        nullable=False
+    )
+    when = Column(TIMESTAMP, comment='когда', nullable=False)
+    name = Column(String(16), comment='имя настройки', nullable=False)
     val = Column(Text, comment='значение')
 
-    devices = relationship('TTblDevices', back_populates='options')
+    device = relationship('TTblDevice', back_populates='config')
+    cfg_namespace = relationship('TTblCfgNamespace', back_populates='config')
 
     def __repr__(self):
         return f'{self.id} {self.id_device} {self.when} {self.name} {self.val}'
+
+def chk_cfg_namespace(engine, name):
+    cfg_namespace = None
+    with Session(engine) as session:
+        cfg_namespace = session.query(TTblCfgNamespace.name).filter_by(name=name).first()
+
+    if cfg_namespace is None:
+        with Session(engine) as session:
+            o = TTblCfgNamespace(name=name)
+            session.add(o)
+            session.commit()
 
 def init_db():
     db_name = 'zenbooster'
@@ -172,6 +212,8 @@ def init_db():
 
     print('Проверка метаданных БД...', end='')
     Base.metadata.create_all(engine)
+    chk_cfg_namespace(engine, 'option')
+    chk_cfg_namespace(engine, 'formula')
     print('Ok!')
 
     return engine
@@ -183,13 +225,13 @@ def on_connect(client, userdata, flags, rc):
 
 def get_device(mac):
     with Session(engine) as session:
-        device = session.query(TTblDevices.id, TTblDevices.mac).filter_by(mac=mac).first()
+        device = session.query(TTblDevice.id, TTblDevice.mac).filter_by(mac=mac).first()
         return device
 
 def get_last_opened_session(mac):
     id_device = get_device(mac).id
     with Session(engine) as session:
-        sess = session.query(TTblSessions.id, TTblSessions.id_device, TTblSessions.begin, TTblSessions.end).filter_by(id_device=id_device, end=None).order_by(TTblSessions.begin.desc()).first()
+        sess = session.query(TTblSession.id, TTblSession.id_device, TTblSession.begin, TTblSession.end).filter_by(id_device=id_device, end=None).order_by(TTblSession.begin.desc()).first()
         return sess
 
 def on_message(client, userdata, msg):
@@ -225,7 +267,7 @@ def on_message(client, userdata, msg):
         else:
             print('Добавляем новое устройство "{}".'.format(mac))
             with Session(engine) as session:
-                device = TTblDevices(mac=mac, name="zenbooster")
+                device = TTblDevice(mac=mac, name="zenbooster")
                 session.add(device)
                 session.commit()
                 id_device = device.id
@@ -235,7 +277,7 @@ def on_message(client, userdata, msg):
     elif st == 'session_begin':
         print('Открываем новую сессию для устройства "{}".'.format(mac))
         with Session(engine) as session:
-            sess = TTblSessions(id_device=get_device(mac).id, begin=dt_when)
+            sess = TTblSession(id_device=get_device(mac).id, begin=dt_when)
             session.add(sess)
             session.commit()
             id_session = sess.id
@@ -259,7 +301,8 @@ def on_message(client, userdata, msg):
                 gl=js['gl'],
                 gm=js['gm'],
                 ea=js['ea'],
-                em=js['em']
+                em=js['em'],
+                f=js['f']
             )
             session.add(eeg_power)
             session.commit()
@@ -272,8 +315,8 @@ def on_message(client, userdata, msg):
         with Session(engine) as session:
             with session.begin():
                 session.execute(
-                    update(TTblSessions)
-                    .where(TTblSessions.id==id_session)
+                    update(TTblSession)
+                    .where(TTblSession.id==id_session)
                     .values(end=dt_when)
                 )
             session.commit()
@@ -285,7 +328,7 @@ def on_message(client, userdata, msg):
 
         with Session(engine) as session:
             session.execute(delete(TTblEegPower).where(TTblEegPower.id_session==id_session))
-            session.execute(delete(TTblSessions).where(TTblSessions.id==id_session))
+            session.execute(delete(TTblSession).where(TTblSession.id==id_session))
             session.commit()
 
     elif st == 'bye':

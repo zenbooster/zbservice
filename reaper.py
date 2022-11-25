@@ -8,8 +8,13 @@ from sqlalchemy import Column, ForeignKey, BigInteger, SmallInteger, Float, Stri
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 
+from sqlalchemy.orm import Session
+
 import paho.mqtt.client as mqtt
 import certifi
+
+import json
+from datetime import datetime
 
 Base = declarative_base()
 
@@ -40,6 +45,10 @@ class TTblDevices(Base):
     )
     description = Column(Text, comment='описание устройства')
 
+    sessions = relationship("TTblSessions", back_populates="devices")
+    eeg_power = relationship("TTblEegPower", back_populates="devices")
+    options = relationship("TTblOptions", back_populates="devices")
+
     def __repr__(self):
         return f'{self.id} {self.mac} {self.name} {self.description}'
 
@@ -67,7 +76,8 @@ class TTblSessions(Base):
     end = Column(TIMESTAMP, comment='конец')
     description = Column(Text, comment='описание сессии')
 
-    device = relationship('TTblDevices', backref='sessions_device', lazy='subquery')
+    eeg_power = relationship("TTblEegPower", back_populates="sessions")
+    devices = relationship('TTblDevices', back_populates='sessions')
 
     def __repr__(self):
         return f'{self.id} {self.id_device} {self.begin} {self.end} {self.description}'
@@ -113,8 +123,8 @@ class TTblEegPower(Base):
     ea = Column(Float, comment='esense внимание', nullable=False)
     em = Column(Float, comment='esense медитация', nullable=False)
 
-    device = relationship('TTblDevices', backref='eeg_power_device', lazy='subquery')
-    session = relationship('TTblDevices', backref='eeg_power_session', lazy='subquery')
+    devices = relationship('TTblDevices', back_populates='eeg_power')
+    sessions = relationship('TTblSessions', back_populates='eeg_power')
 
     def __repr__(self):
         return f'{self.id} {self.id_device} {self.id_session} {self.when} {self.poor} {self.d} {self.t} {self.al} {self.ah} {self.bl} {self.bh} {self.gl} {self.gm} {self.ea} {self.em}'
@@ -143,7 +153,7 @@ class TTblOptions(Base):
     name = Column(String(16), comment='имя опции')
     val = Column(Text, comment='значение')
 
-    device = relationship('TTblDevices', backref='options_device', lazy='subquery')
+    devices = relationship('TTblDevices', back_populates='options')
 
     def __repr__(self):
         return f'{self.id} {self.id_device} {self.when} {self.name} {self.val}'
@@ -170,21 +180,48 @@ def init_db():
     Base.metadata.create_all(engine)
     print('Ok!')
 
+    return engine
+
 def on_connect(client, userdata, flags, rc):
     print('Connected with result code '+str(rc))
 
     client.subscribe('devices/zenbooster/#')
 
 def on_message(client, userdata, msg):
-    print(msg.topic+' '+str(msg.payload))
+    st = msg.topic
+    print('topic: '+st)
+    st = st[len('devices/zenbooster/'):]
+    mac=st[:6*2+5]
+    st = st[len(mac)+1:]
+
+    if st == 'hello':
+        mac = mac.translate(str.maketrans('', '', ':- '))
+
+        print('subtopic: '+st)
+        print('mac: '+mac)
+        js = msg.payload.decode()
+        print('data: '+js)
+        js = json.loads(js)
+        when = js['when']
+
+        print('when: {}'.format(datetime.utcfromtimestamp(when)))
+
+        engine = userdata
+        with Session(engine) as session:
+            is_exists = session.query(TTblDevices.mac).filter_by(name=st).first() is not None
+
+
+        if not is_exists:
+            print('ты кто?')
+
 
 def on_log(client, userdata, level, buf):
   print('log: ', buf)
 
-init_db()
+engine = init_db()
 
 print('Подключаемся к MQTT брокеру:')
-client = mqtt.Client()
+client = mqtt.Client(userdata=engine)
 client.on_connect = on_connect
 client.on_message = on_message
 client.on_log = on_log

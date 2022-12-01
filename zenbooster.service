@@ -1,0 +1,20 @@
+[Unit]
+Description = Служба для сбора MQTT данных от устройства zenbooster и записи их в СУБД.
+After=network.target
+After=mysql.service
+After=mosquitto.service
+Requires=mysql.service
+Requires=mosquitto.service
+ 
+[Service]
+Type = simple
+ExecStart = python3 /home/zenbooster/git/zbservice/reaper.py
+User = zenbooster
+Group = zenbooster
+Restart = on-failure
+SyslogIdentifier = zenbooster
+RestartSec = 5
+TimeoutStartSec = infinity
+ 
+[Install]
+WantedBy = multi-user.target

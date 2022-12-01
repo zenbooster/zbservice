@@ -189,7 +189,7 @@ def get_cfg_namespace(engine, name):
 def chk_cfg_namespace(engine, name):
     cfg_namespace = None
     with Session(engine) as session:
-        cfg_namespace = get_cfg_namespace(engine, name) #session.query(TTblCfgNamespace.name).filter_by(name=name).first()
+        cfg_namespace = get_cfg_namespace(engine, name)
 
     if cfg_namespace is None:
         with Session(engine) as session:
@@ -206,7 +206,8 @@ def init_db():
             os.environ.get('ZB_MYSQL_HOST'),
             int(os.environ.get('ZB_MYSQL_PORT')),
             db_name
-        )
+        ),
+        pool_recycle=3600
     )
     if database_exists(engine.url):
         print('Найдена БД "{}"!'.format(db_name))
@@ -368,16 +369,21 @@ def on_message(client, userdata, msg):
 def on_log(client, userdata, level, buf):
   print('log: ', buf)
 
-engine = init_db()
-
-print('Подключаемся к MQTT брокеру:')
-client = mqtt.Client(userdata=engine)
-client.on_connect = on_connect
-client.on_message = on_message
-client.on_log = on_log
-
-client.tls_set(certifi.where())
-client.username_pw_set(os.environ.get('ZB_MQTT_USER'), os.environ.get('ZB_MQTT_PASS'))
-client.connect(os.environ.get('ZB_MQTT_HOST'), int(os.environ.get('ZB_MQTT_PORT')), 60)
-
-client.loop_forever()
+while(True):
+    try:
+    	engine = init_db()
+    	print('Подключаемся к MQTT брокеру:')
+    	client = mqtt.Client(userdata=engine)
+    	client.on_connect = on_connect
+    	client.on_message = on_message
+    	client.on_log = on_log
+	
+    	client.tls_set(certifi.where())
+    	client.username_pw_set(os.environ.get('ZB_MQTT_USER'), os.environ.get('ZB_MQTT_PASS'))
+    	client.connect(os.environ.get('ZB_MQTT_HOST'), int(os.environ.get('ZB_MQTT_PORT')), 60)
+	
+    	client.loop_forever()
+    except KeyboardInterrupt:
+        exit(0)
+    except:
+        print('Произошло исключение, восстанавливаемся...')

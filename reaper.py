@@ -34,7 +34,7 @@ def on_message(client, userdata, msg):
     print(f'[begin on_{st}]')
     if st == 'hello':
         with Session(engine) as session:
-            device = get_device(mac)
+            device = get_device(engine, mac)
             is_exists = device is not None
 
         id_device = None
@@ -49,27 +49,27 @@ def on_message(client, userdata, msg):
                 session.commit()
                 id_device = device.id
 
-        update_config_table(id_device, 'option', js['options'])
-        update_config_table(id_device, 'formula', js['formulas'])
+        update_config_table(engine, id_device, 'option', js['options'])
+        update_config_table(engine, id_device, 'formula', js['formulas'])
 
         print('ИД устройства: {}'.format(id_device))
 
     elif st == 'session_begin':
         print('Открываем новую сессию для устройства "{}".'.format(mac))
         with Session(engine) as session:
-            sess = TTblSession(id_device=get_device(mac).id, begin=dt_when)
+            sess = TTblSession(id_device=get_device(engine, mac).id, begin=dt_when)
             session.add(sess)
             session.commit()
             id_session = sess.id
         print('ИД сессии: {}'.format(id_session))
 
     elif st == 'eeg_power':
-        id_session = get_last_opened_session(mac).id
+        id_session = get_last_opened_session(engine, mac).id
         print('Добавляем данные в сессию с ИД {}.'.format(id_session))
 
         with Session(engine) as session:
             eeg_power = TTblEegPower(
-                id_session=get_last_opened_session(mac).id,
+                id_session=get_last_opened_session(engine, mac).id,
                 when=dt_when,
                 poor=js['poor'],
                 d=js['d'],
@@ -89,7 +89,7 @@ def on_message(client, userdata, msg):
 
     elif st == 'session_end':
         print('Закрываем сессию для устройства "{}".'.format(mac))
-        id_session = get_last_opened_session(mac).id
+        id_session = get_last_opened_session(engine, mac).id
         print('ИД закрываемой сессии: {}'.format(id_session))
 
         with Session(engine) as session:
@@ -103,7 +103,7 @@ def on_message(client, userdata, msg):
 
     elif st == 'session_cancel':
         print('Удаляем сессию и связанные данные для устройства "{}".'.format(mac))
-        id_session = get_last_opened_session(mac).id
+        id_session = get_last_opened_session(engine, mac).id
         print('ИД удаляемой сессии: {}'.format(id_session))
 
         with Session(engine) as session:

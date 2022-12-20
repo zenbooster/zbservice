@@ -219,18 +219,18 @@ def init_db():
 
     return engine
 
-def get_device(mac):
+def get_device(engine, mac):
     with Session(engine) as session:
         res = session.query(TTblDevice.id, TTblDevice.mac).filter_by(mac=mac).first()
         return res
 
-def get_last_opened_session(mac):
-    id_device = get_device(mac).id
+def get_last_opened_session(engine, mac):
+    id_device = get_device(engine, mac).id
     with Session(engine) as session:
         sess = session.query(TTblSession.id, TTblSession.id_device, TTblSession.begin, TTblSession.end).filter_by(id_device=id_device, end=None).order_by(TTblSession.begin.desc()).first()
         return sess
 
-def get_last_config(id_device, id_cfg_namespace, k):
+def get_last_config(engine, id_device, id_cfg_namespace, k):
     with Session(engine) as session:
         res = session.query(TTblConfig.id, TTblConfig.id_device, TTblConfig.id_cfg_namespace, TTblConfig.when, TTblConfig.name, TTblConfig.val) \
           .filter_by(id_device=id_device, id_cfg_namespace=id_cfg_namespace, name=k) \
@@ -238,7 +238,7 @@ def get_last_config(id_device, id_cfg_namespace, k):
           .first()
         return res
 
-def update_config(id_device, namespace, k, v):
+def update_config(engine, id_device, namespace, k, v):
     id_cfg_namespace = get_cfg_namespace(engine, namespace).id
     o = get_last_config(id_device, id_cfg_namespace, k)
     if (o is None) or (o.val != v):
@@ -247,6 +247,6 @@ def update_config(id_device, namespace, k, v):
             session.add(o)
             session.commit()
 
-def update_config_table(id_device, namespace, js):
+def update_config_table(engine, id_device, namespace, js):
     for k, v in js.items():
-        update_config(id_device, namespace, k, v)
+        update_config(engine, id_device, namespace, k, v)
